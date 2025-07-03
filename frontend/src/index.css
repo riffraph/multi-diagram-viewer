@@ -1,0 +1,197 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f5f5;
+  overflow: hidden; /* Prevent body scrolling */
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Prevent scrolling on all diagram-related containers */
+.diagram-panel,
+.diagram-panel-content,
+.konvajs-content {
+  overflow: hidden !important;
+  -webkit-overflow-scrolling: auto !important;
+  overscroll-behavior: none !important;
+  touch-action: none !important;
+}
+
+/* Prevent any scrolling on the main app container */
+#root {
+  overflow: hidden !important;
+  height: 100vh !important;
+}
+
+.react-grid-item {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  overflow: hidden !important;
+}
+
+.react-grid-item.react-grid-placeholder {
+  background: #007bff;
+  opacity: 0.3;
+  border-radius: 4px;
+}
+
+.diagram-panel {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden !important;
+}
+
+.diagram-panel-header {
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #ddd;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.diagram-panel-content {
+  flex: 1;
+  overflow: hidden !important;
+  position: relative;
+  min-height: 0;
+}
+
+.diagram-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.controls {
+  padding: 16px;
+  background: white;
+  border-bottom: 1px solid #ddd;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  flex-shrink: 0;
+}
+
+.controls h1 {
+  margin: 0 0 16px 0;
+  color: #333;
+  font-size: 24px;
+}
+
+.controls select {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  margin-right: 8px;
+}
+
+.controls button {
+  padding: 8px 16px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  margin-right: 8px;
+}
+
+.controls button:hover {
+  background: #0056b3;
+}
+
+.controls button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+}
+
+.status {
+  padding: 8px 12px;
+  background: #e9ecef;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 8px;
+}
+
+/* Annotation component styles */
+.react-grid-item {
+  overflow: hidden !important;
+}
+
+.diagram-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden !important;
+}
+
+.diagram-panel-content {
+  flex: 1;
+  overflow: hidden !important;
+  position: relative;
+  min-height: 0;
+}
+
+/* Konva stage container */
+.konvajs-content {
+  background: transparent;
+  overflow: hidden !important;
+  touch-action: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  user-select: none !important;
+}
+
+/* Toolbar button hover effects */
+button:hover {
+  opacity: 0.8;
+}
+
+/* Color picker styling */
+input[type="color"] {
+  -webkit-appearance: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+/* Additional scroll prevention */
+html {
+  overflow: hidden !important;
+}
+
+/* Prevent any touch scrolling */
+* {
+  -webkit-overflow-scrolling: auto !important;
+  overscroll-behavior: none !important;
+} 
