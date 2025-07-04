@@ -1,12 +1,10 @@
-version: '3.8'
-
 services:
   multi-diagram-viewer:
     build: .
     ports:
       - "8000:8000"
     volumes:
-      - ./diagrams:/app/diagrams
+      - ./diagrams:/app/diagrams:ro
     environment:
       - DIAGRAMS_DIR=/app/diagrams
     restart: unless-stopped 

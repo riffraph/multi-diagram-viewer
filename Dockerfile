@@ -18,24 +18,26 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Run the backend with the built frontend
-FROM python:3.12-slim
+FROM node:18-alpine
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Copy backend package files
+COPY backend/package*.json ./backend/
 
-# Copy backend requirements and install Python dependencies
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install backend dependencies (including dev dependencies for TypeScript build)
+WORKDIR /app/backend
+RUN npm install
 
-# Copy backend code
-COPY backend/ ./backend/
+# Copy backend source code
+COPY backend/src ./src/
+COPY backend/tsconfig.json ./
+
+# Build TypeScript
+RUN npm run build
 
 # Copy built frontend from stage 1
-COPY --from=frontend-builder /app/frontend/build ./frontend/build
+COPY --from=frontend-builder /app/frontend/build /app/frontend/build
 
 # Create diagrams directory
 RUN mkdir -p ./diagrams
@@ -44,8 +46,9 @@ RUN mkdir -p ./diagrams
 EXPOSE 8000
 
 # Set environment variables
-ENV PYTHONPATH=/app
-ENV DIAGRAMS_DIR=./diagrams
+ENV NODE_ENV=production
+ENV DIAGRAMS_DIR=/app/diagrams
 
-# Run the application
-CMD ["python", "backend/main.py"] 
+# Run the application from the app directory
+WORKDIR /app
+CMD ["node", "backend/dist/server.js"] 

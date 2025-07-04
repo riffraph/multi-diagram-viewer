@@ -1,29 +1,38 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Stage, Layer, Image, Line, Rect, Circle, Text, Transformer } from 'react-konva';
 
-const AnnotatedImageWithZoom = ({ imageUrl }) => {
+const AnnotatedImageWithZoom = ({ 
+  imageUrl, 
+  globalAnnotationSettings, 
+  preservedAnnotations, 
+  preservedZoomState, 
+  onAnnotationsUpdate, 
+  onZoomStateUpdate 
+}) => {
   const [image, setImage] = useState(null);
-  const [scale, setScale] = useState(1);
-  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(preservedZoomState?.scale ?? 1);
+  const [position, setPosition] = useState(preservedZoomState?.position ?? { x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [lastPanPoint, setLastPanPoint] = useState({ x: 0, y: 0 });
   const [containerSize, setContainerSize] = useState({ width: 800, height: 600 });
+  const [isInitialized, setIsInitialized] = useState(false);
   
-  // Annotation states
-  const [annotationsEnabled, setAnnotationsEnabled] = useState(false);
-  const [tool, setTool] = useState('pen');
-  const [color, setColor] = useState('#ff0000');
-  const [strokeWidth, setStrokeWidth] = useState(2);
+  // Use global annotation settings if provided, otherwise use local state
+  const annotationsEnabled = globalAnnotationSettings?.annotationsEnabled ?? false;
+  const tool = globalAnnotationSettings?.tool ?? 'pen';
+  const color = globalAnnotationSettings?.color ?? '#ff0000';
+  const strokeWidth = globalAnnotationSettings?.strokeWidth ?? 2;
   
   // Drawing states
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentLine, setCurrentLine] = useState([]);
   const [currentShape, setCurrentShape] = useState(null);
+  const [isCreatingText, setIsCreatingText] = useState(false);
   
-  // Annotation data
-  const [lines, setLines] = useState([]);
-  const [shapes, setShapes] = useState([]);
-  const [texts, setTexts] = useState([]);
+  // Annotation data - initialize with preserved state if available
+  const [lines, setLines] = useState(preservedAnnotations?.lines ?? []);
+  const [shapes, setShapes] = useState(preservedAnnotations?.shapes ?? []);
+  const [texts, setTexts] = useState(preservedAnnotations?.texts ?? []);
   
   // Selection and editing
   const [selectedId, setSelectedId] = useState(null);
@@ -36,30 +45,57 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
   const transformerRef = useRef();
   const containerRef = useRef();
 
+  // Notify parent of annotation changes
+  useEffect(() => {
+    if (onAnnotationsUpdate) {
+      onAnnotationsUpdate({
+        lines,
+        shapes,
+        texts
+      });
+    }
+  }, [lines, shapes, texts, onAnnotationsUpdate]);
+
+  // Notify parent of zoom state changes
+  useEffect(() => {
+    if (onZoomStateUpdate) {
+      onZoomStateUpdate({
+        scale,
+        position
+      });
+    }
+  }, [scale, position, onZoomStateUpdate]);
+
   // Load image
   useEffect(() => {
     const img = new window.Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       setImage(img);
+      setIsInitialized(false); // Reset initialization flag for new image
     };
     img.src = imageUrl;
   }, [imageUrl]);
 
-  // Handle container sizing
+  // Handle container sizing - measure the actual visible area
   useEffect(() => {
     const updateContainerSize = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
-        setContainerSize({
-          width: rect.width,
-          height: rect.height
-        });
+        // Only update if we have valid dimensions
+        if (rect.width > 50 && rect.height > 50) {
+          setContainerSize({
+            width: rect.width,
+            height: rect.height
+          });
+        }
       }
     };
 
-    // Initial update
-    updateContainerSize();
+    // Use requestAnimationFrame to ensure DOM is ready
+    const rafId = requestAnimationFrame(() => {
+      updateContainerSize();
+    });
 
     // Update on window resize
     window.addEventListener('resize', updateContainerSize);
@@ -71,10 +107,26 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
     }
 
     return () => {
+      cancelAnimationFrame(rafId);
       window.removeEventListener('resize', updateContainerSize);
       observer.disconnect();
     };
   }, []);
+
+  // Center and fit image when it loads - use the same logic as the working Reset button
+  useEffect(() => {
+    if (image && !isInitialized) {
+      // If we have preserved zoom state, use it; otherwise reset to default
+      if (preservedZoomState) {
+        setScale(preservedZoomState.scale);
+        setPosition(preservedZoomState.position);
+      } else {
+        setScale(1);
+        setPosition({ x: 0, y: 0 });
+      }
+      setIsInitialized(true);
+    }
+  }, [image, isInitialized, preservedZoomState]);
 
   // Handle transformer updates
   useEffect(() => {
@@ -86,6 +138,30 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
       }
     }
   }, [selectedId]);
+
+  // Handle text creation prompt
+  useEffect(() => {
+    if (isCreatingText && currentShape && currentShape.type === 'text') {
+      const textInput = prompt('Enter text:');
+      if (textInput && textInput.trim()) {
+        const newText = {
+          id: Date.now().toString(),
+          x: currentShape.x,
+          y: currentShape.y,
+          text: textInput.trim(),
+          fontSize: 16,
+          fill: color,
+          draggable: true
+        };
+        setTexts([...texts, newText]);
+        setSelectedId(newText.id);
+        setSelectedType('text');
+      }
+      // Reset text creation mode
+      setIsCreatingText(false);
+      setCurrentShape(null);
+    }
+  }, [isCreatingText, currentShape, color, texts]);
 
   const getImageScale = () => {
     if (!image || !containerSize.width || !containerSize.height) return 1;
@@ -133,17 +209,35 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
     e.evt.preventDefault();
     e.evt.stopPropagation();
     
-    const pos = e.target.getStage().getPointerPosition();
+    const stage = e.target.getStage();
+    const pointer = stage.getPointerPosition();
+    
+    // Transform coordinates from stage space to image space
+    // First, convert from stage coordinates to stage-local coordinates
+    const stageLocalX = (pointer.x - position.x) / scale;
+    const stageLocalY = (pointer.y - position.y) / scale;
+    
+    // Then convert from stage-local coordinates to image coordinates
+    const transformedPos = {
+      x: (stageLocalX - imageX) / imageScale,
+      y: (stageLocalY - imageY) / imageScale
+    };
+    
+    // Ensure coordinates are within image bounds
+    if (transformedPos.x < 0 || transformedPos.x > image.width || 
+        transformedPos.y < 0 || transformedPos.y > image.height) {
+      return; // Don't create annotations outside the image
+    }
     
     if (tool === 'pen') {
       setIsDrawing(true);
-      setCurrentLine([pos.x, pos.y]);
+      setCurrentLine([transformedPos.x, transformedPos.y]);
     } else if (tool === 'rectangle') {
       setCurrentShape({
         id: Date.now().toString(),
         type: 'rectangle',
-        x: pos.x,
-        y: pos.y,
+        x: transformedPos.x,
+        y: transformedPos.y,
         width: 0,
         height: 0,
         fill: 'transparent',
@@ -154,8 +248,8 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
       setCurrentShape({
         id: Date.now().toString(),
         type: 'circle',
-        x: pos.x,
-        y: pos.y,
+        x: transformedPos.x,
+        y: transformedPos.y,
         radius: 0,
         fill: 'transparent',
         stroke: color,
@@ -165,27 +259,20 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
       setCurrentShape({
         id: Date.now().toString(),
         type: 'line',
-        points: [pos.x, pos.y, pos.x, pos.y],
+        points: [transformedPos.x, transformedPos.y, transformedPos.x, transformedPos.y],
         stroke: color,
         strokeWidth: strokeWidth
       });
-    } else if (tool === 'text') {
-      // Prompt for text input
-      const textInput = prompt('Enter text:');
-      if (textInput && textInput.trim()) {
-        const newText = {
-          id: Date.now().toString(),
-          x: pos.x,
-          y: pos.y,
-          text: textInput.trim(),
-          fontSize: 16,
-          fill: color,
-          draggable: true
-        };
-        setTexts([...texts, newText]);
-        setSelectedId(newText.id);
-        setSelectedType('text');
-      }
+    } else if (tool === 'text' && !isCreatingText) {
+      // Start text creation mode
+      setIsCreatingText(true);
+      // Store the position for when text is entered
+      setCurrentShape({
+        id: 'temp-text',
+        type: 'text',
+        x: transformedPos.x,
+        y: transformedPos.y
+      });
     }
   };
 
@@ -212,20 +299,38 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
     e.evt.preventDefault();
     e.evt.stopPropagation();
     
-    const pos = e.target.getStage().getPointerPosition();
+    const stage = e.target.getStage();
+    const pointer = stage.getPointerPosition();
+    
+    // Transform coordinates from stage space to image space
+    // First, convert from stage coordinates to stage-local coordinates
+    const stageLocalX = (pointer.x - position.x) / scale;
+    const stageLocalY = (pointer.y - position.y) / scale;
+    
+    // Then convert from stage-local coordinates to image coordinates
+    const transformedPos = {
+      x: (stageLocalX - imageX) / imageScale,
+      y: (stageLocalY - imageY) / imageScale
+    };
+    
+    // Ensure coordinates are within image bounds
+    if (transformedPos.x < 0 || transformedPos.x > image.width || 
+        transformedPos.y < 0 || transformedPos.y > image.height) {
+      return; // Don't update annotations outside the image
+    }
     
     if (tool === 'pen' && isDrawing) {
-      setCurrentLine([...currentLine, pos.x, pos.y]);
+      setCurrentLine([...currentLine, transformedPos.x, transformedPos.y]);
     } else if (currentShape) {
       if (currentShape.type === 'rectangle') {
         setCurrentShape({
           ...currentShape,
-          width: pos.x - currentShape.x,
-          height: pos.y - currentShape.y
+          width: transformedPos.x - currentShape.x,
+          height: transformedPos.y - currentShape.y
         });
       } else if (currentShape.type === 'circle') {
         const radius = Math.sqrt(
-          Math.pow(pos.x - currentShape.x, 2) + Math.pow(pos.y - currentShape.y, 2)
+          Math.pow(transformedPos.x - currentShape.x, 2) + Math.pow(transformedPos.y - currentShape.y, 2)
         );
         setCurrentShape({
           ...currentShape,
@@ -234,7 +339,7 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
       } else if (currentShape.type === 'line') {
         setCurrentShape({
           ...currentShape,
-          points: [currentShape.points[0], currentShape.points[1], pos.x, pos.y]
+          points: [currentShape.points[0], currentShape.points[1], transformedPos.x, transformedPos.y]
         });
       }
     }
@@ -269,7 +374,7 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
   };
 
   const handleShapeClick = (e) => {
-    if (!annotationsEnabled) return;
+    if (!annotationsEnabled || isCreatingText) return;
     
     e.evt.preventDefault();
     e.evt.stopPropagation();
@@ -371,15 +476,86 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
   };
 
   const exportToPNG = () => {
-    if (stageRef.current) {
-      const dataURL = stageRef.current.toDataURL();
-      const link = document.createElement('a');
-      link.download = 'annotated-image.png';
-      link.href = dataURL;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
+    if (!image || !stageRef.current) return;
+    
+    // Create a temporary canvas for high-quality export
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Use the original image dimensions for high quality
+    const originalWidth = image.naturalWidth || image.width;
+    const originalHeight = image.naturalHeight || image.height;
+    
+    canvas.width = originalWidth;
+    canvas.height = originalHeight;
+    
+    // Draw the background image at full resolution
+    ctx.drawImage(image, 0, 0, originalWidth, originalHeight);
+    
+    // Draw all annotations at the correct scale
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = strokeWidth;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    // Draw lines
+    lines.forEach(line => {
+      ctx.strokeStyle = line.stroke;
+      ctx.lineWidth = line.strokeWidth;
+      ctx.beginPath();
+      for (let i = 0; i < line.points.length; i += 2) {
+        const x = line.points[i];
+        const y = line.points[i + 1];
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.stroke();
+    });
+    
+    // Draw shapes
+    shapes.forEach(shape => {
+      ctx.strokeStyle = shape.stroke;
+      ctx.fillStyle = shape.fill;
+      ctx.lineWidth = shape.strokeWidth;
+      
+      if (shape.type === 'rectangle') {
+        ctx.strokeRect(shape.x, shape.y, shape.width, shape.height);
+        if (shape.fill !== 'transparent') {
+          ctx.fillRect(shape.x, shape.y, shape.width, shape.height);
+        }
+      } else if (shape.type === 'circle') {
+        ctx.beginPath();
+        ctx.arc(shape.x, shape.y, shape.radius, 0, 2 * Math.PI);
+        ctx.stroke();
+        if (shape.fill !== 'transparent') {
+          ctx.fill();
+        }
+      } else if (shape.type === 'line') {
+        ctx.beginPath();
+        ctx.moveTo(shape.points[0], shape.points[1]);
+        ctx.lineTo(shape.points[2], shape.points[3]);
+        ctx.stroke();
+      }
+    });
+    
+    // Draw text
+    texts.forEach(text => {
+      ctx.font = `${text.fontSize}px Arial`;
+      ctx.fillStyle = text.fill;
+      ctx.fillText(text.text, text.x, text.y);
+    });
+    
+    // Export the high-quality canvas
+    const dataURL = canvas.toDataURL('image/png', 1.0);
+    const link = document.createElement('a');
+    link.download = 'annotated-image.png';
+    link.href = dataURL;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const clearAll = () => {
@@ -397,10 +573,10 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
         <Rect
           key={shape.id}
           id={shape.id}
-          x={shape.x}
-          y={shape.y}
-          width={shape.width}
-          height={shape.height}
+          x={imageX + (shape.x * imageScale * scale)}
+          y={imageY + (shape.y * imageScale * scale)}
+          width={shape.width * imageScale * scale}
+          height={shape.height * imageScale * scale}
           fill={shape.fill}
           stroke={shape.stroke}
           strokeWidth={shape.strokeWidth}
@@ -408,6 +584,7 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
           onClick={handleShapeClick}
           onTap={handleShapeClick}
           onContextMenu={handleContextMenu}
+          onDragEnd={(e) => handleShapeDragEnd(e, shape.id, 'shape')}
         />
       );
     } else if (shape.type === 'circle') {
@@ -415,9 +592,9 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
         <Circle
           key={shape.id}
           id={shape.id}
-          x={shape.x}
-          y={shape.y}
-          radius={shape.radius}
+          x={imageX + (shape.x * imageScale * scale)}
+          y={imageY + (shape.y * imageScale * scale)}
+          radius={shape.radius * imageScale * scale}
           fill={shape.fill}
           stroke={shape.stroke}
           strokeWidth={shape.strokeWidth}
@@ -425,6 +602,7 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
           onClick={handleShapeClick}
           onTap={handleShapeClick}
           onContextMenu={handleContextMenu}
+          onDragEnd={(e) => handleShapeDragEnd(e, shape.id, 'shape')}
         />
       );
     } else if (shape.type === 'line') {
@@ -432,17 +610,72 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
         <Line
           key={shape.id}
           id={shape.id}
-          points={shape.points}
+          points={shape.points.map((point, index) => {
+            if (index % 2 === 0) {
+              // X coordinate - transform from original image space to display space
+              return imageX + (point * imageScale * scale);
+            } else {
+              // Y coordinate - transform from original image space to display space
+              return imageY + (point * imageScale * scale);
+            }
+          })}
           stroke={shape.stroke}
           strokeWidth={shape.strokeWidth}
           draggable={shape.draggable}
           onClick={handleShapeClick}
           onTap={handleShapeClick}
           onContextMenu={handleContextMenu}
+          onDragEnd={(e) => handleShapeDragEnd(e, shape.id, 'shape')}
         />
       );
     }
     return null;
+  };
+
+  const handleShapeDragEnd = (e, shapeId, shapeType) => {
+    const stage = e.target.getStage();
+    const pointer = stage.getPointerPosition();
+    
+    // Transform coordinates back to original image space
+    const transformedPos = {
+      x: (pointer.x - position.x - imageX) / (scale * imageScale),
+      y: (pointer.y - position.y - imageY) / (scale * imageScale)
+    };
+    
+    if (shapeType === 'text') {
+      setTexts(texts.map(text => 
+        text.id === shapeId 
+          ? { ...text, x: transformedPos.x, y: transformedPos.y }
+          : text
+      ));
+    } else if (shapeType === 'shape') {
+      setShapes(shapes.map(shape => 
+        shape.id === shapeId 
+          ? { ...shape, x: transformedPos.x, y: transformedPos.y }
+          : shape
+      ));
+    } else if (shapeType === 'line') {
+      // For lines, we need to update all points
+      const line = lines.find(l => l.id === shapeId);
+      if (line) {
+        const newPoints = [];
+        for (let i = 0; i < line.points.length; i += 2) {
+          const oldX = line.points[i];
+          const oldY = line.points[i + 1];
+          const displayX = imageX + (oldX * imageScale * scale);
+          const displayY = imageY + (oldY * imageScale * scale);
+          const deltaX = pointer.x - displayX;
+          const deltaY = pointer.y - displayY;
+          newPoints.push(oldX + (deltaX / (scale * imageScale)));
+          newPoints.push(oldY + (deltaY / (scale * imageScale)));
+        }
+        setLines(lines.map(l => 
+          l.id === shapeId 
+            ? { ...l, points: newPoints }
+            : l
+        ));
+      }
+    }
   };
 
   return (
@@ -453,7 +686,7 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
       flexDirection: 'column',
       overflow: 'hidden'
     }}>
-      {/* Toolbar */}
+      {/* Panel controls - export, clear, reset, and zoom slider */}
       <div style={{ 
         padding: '4px 6px', 
         borderBottom: '1px solid #ccc', 
@@ -462,281 +695,97 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
         gap: '4px',
         backgroundColor: '#f8f9fa',
         zIndex: 1000,
-        flexWrap: 'wrap',
-        minHeight: '32px',
-        overflow: 'hidden',
-        fontSize: '11px'
+        fontSize: '11px',
+        justifyContent: 'space-between'
       }}>
-        {/* Annotation Toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-          <span style={{ fontSize: '10px' }}>Annotations:</span>
-          <button
-            onClick={() => setAnnotationsEnabled(!annotationsEnabled)}
+        {/* Zoom slider */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '4px',
+          flex: 1,
+          maxWidth: '200px'
+        }}>
+          <span style={{ fontSize: '10px', whiteSpace: 'nowrap' }}>Zoom:</span>
+          <input
+            type="range"
+            min="0.1"
+            max="5"
+            step="0.1"
+            value={scale}
+            onChange={(e) => {
+              const newScale = parseFloat(e.target.value);
+              // Calculate center of the container
+              const centerX = containerSize.width / 2;
+              const centerY = containerSize.height / 2;
+              
+              // Calculate the position to keep the center point fixed
+              const mousePointTo = {
+                x: (centerX - position.x) / scale,
+                y: (centerY - position.y) / scale,
+              };
+              
+              setScale(newScale);
+              setPosition({
+                x: centerX - mousePointTo.x * newScale,
+                y: centerY - mousePointTo.y * newScale,
+              });
+            }}
             style={{ 
-              backgroundColor: annotationsEnabled ? '#28a745' : '#dc3545',
+              flex: 1,
+              height: '4px',
+              borderRadius: '2px',
+              background: `linear-gradient(to right, #007bff 0%, #007bff ${(scale - 0.1) / 4.9 * 100}%, #ddd ${(scale - 0.1) / 4.9 * 100}%, #ddd 100%)`,
+              outline: 'none',
+              cursor: 'pointer',
+              WebkitAppearance: 'none',
+              appearance: 'none'
+            }}
+          />
+          <span style={{ fontSize: '10px', minWidth: '30px', textAlign: 'right' }}>
+            {Math.round(scale * 100)}%
+          </span>
+
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: '4px' }}>
+          <button
+            onClick={exportToPNG}
+            style={{
+              backgroundColor: '#28a745',
               color: '#fff',
               border: 'none',
               padding: '3px 6px',
               cursor: 'pointer',
-              fontWeight: 'bold',
               borderRadius: '3px',
-              minWidth: '30px',
+              minWidth: '50px',
               textAlign: 'center',
               fontSize: '10px'
             }}
           >
-            {annotationsEnabled ? 'ON' : 'OFF'}
+            Export
           </button>
-        </div>
-        
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '3px',
-          opacity: annotationsEnabled ? 1 : 0.5,
-          pointerEvents: annotationsEnabled ? 'auto' : 'none',
-          flexWrap: 'wrap'
-        }}>
+          
           <button
-            onClick={() => setTool('pen')}
-            style={{ 
-              backgroundColor: tool === 'pen' ? '#007bff' : '#fff',
-              color: tool === 'pen' ? '#fff' : '#000',
-              border: '1px solid #ccc',
+            onClick={clearAll}
+            style={{
+              backgroundColor: '#dc3545',
+              color: '#fff',
+              border: 'none',
               padding: '3px 6px',
-              cursor: annotationsEnabled ? 'pointer' : 'not-allowed',
+              cursor: 'pointer',
               borderRadius: '3px',
-              minWidth: '40px',
+              minWidth: '45px',
               textAlign: 'center',
               fontSize: '10px'
             }}
           >
-            Pen
+            Clear
           </button>
-          <button
-            onClick={() => setTool('rectangle')}
-            style={{ 
-              backgroundColor: tool === 'rectangle' ? '#007bff' : '#fff',
-              color: tool === 'rectangle' ? '#fff' : '#000',
-              border: '1px solid #ccc',
-              padding: '3px 6px',
-              cursor: annotationsEnabled ? 'pointer' : 'not-allowed',
-              borderRadius: '3px',
-              minWidth: '40px',
-              textAlign: 'center',
-              fontSize: '10px'
-            }}
-          >
-            Rect
-          </button>
-          <button
-            onClick={() => setTool('circle')}
-            style={{ 
-              backgroundColor: tool === 'circle' ? '#007bff' : '#fff',
-              color: tool === 'circle' ? '#fff' : '#000',
-              border: '1px solid #ccc',
-              padding: '3px 6px',
-              cursor: annotationsEnabled ? 'pointer' : 'not-allowed',
-              borderRadius: '3px',
-              minWidth: '40px',
-              textAlign: 'center',
-              fontSize: '10px'
-            }}
-          >
-            Circle
-          </button>
-          <button
-            onClick={() => setTool('line')}
-            style={{ 
-              backgroundColor: tool === 'line' ? '#007bff' : '#fff',
-              color: tool === 'line' ? '#fff' : '#000',
-              border: '1px solid #ccc',
-              padding: '3px 6px',
-              cursor: annotationsEnabled ? 'pointer' : 'not-allowed',
-              borderRadius: '3px',
-              minWidth: '40px',
-              textAlign: 'center',
-              fontSize: '10px'
-            }}
-          >
-            Line
-          </button>
-          <button
-            onClick={() => setTool('text')}
-            style={{ 
-              backgroundColor: tool === 'text' ? '#007bff' : '#fff',
-              color: tool === 'text' ? '#fff' : '#000',
-              border: '1px solid #ccc',
-              padding: '3px 6px',
-              cursor: annotationsEnabled ? 'pointer' : 'not-allowed',
-              borderRadius: '3px',
-              minWidth: '40px',
-              textAlign: 'center',
-              fontSize: '10px'
-            }}
-          >
-            Text
-          </button>
-        </div>
-        
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '3px',
-          opacity: annotationsEnabled ? 1 : 0.5,
-          flexWrap: 'wrap'
-        }}>
-          <span style={{ fontSize: '10px' }}>Color:</span>
-          <input
-            type="color"
-            value={color}
-            onChange={(e) => setColor(e.target.value)}
-            style={{ 
-              width: '20px', 
-              height: '20px', 
-              border: 'none', 
-              cursor: annotationsEnabled ? 'pointer' : 'not-allowed'
-            }}
-            disabled={!annotationsEnabled}
-          />
-        </div>
-        
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '3px',
-          opacity: annotationsEnabled ? 1 : 0.5,
-          flexWrap: 'wrap'
-        }}>
-          <span style={{ fontSize: '10px' }}>Width:</span>
-          <input
-            type="range"
-            min="1"
-            max="20"
-            value={strokeWidth}
-            onChange={(e) => setStrokeWidth(parseInt(e.target.value))}
-            style={{ width: '40px' }}
-            disabled={!annotationsEnabled}
-          />
-          <span style={{ fontSize: '10px' }}>{strokeWidth}</span>
-        </div>
+          
 
-        {/* Selection Controls */}
-        {selectedId && (
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: '3px',
-            borderLeft: '1px solid #ccc',
-            paddingLeft: '8px',
-            marginLeft: '8px'
-          }}>
-            <span style={{ fontSize: '10px', color: '#666' }}>
-              Selected: {selectedType}
-            </span>
-            <button
-              onClick={deleteSelected}
-              style={{
-                backgroundColor: '#dc3545',
-                color: '#fff',
-                border: 'none',
-                padding: '3px 6px',
-                cursor: 'pointer',
-                borderRadius: '3px',
-                fontSize: '10px'
-              }}
-            >
-              Delete
-            </button>
-            <button
-              onClick={changeColor}
-              style={{
-                backgroundColor: '#ffc107',
-                color: '#000',
-                border: 'none',
-                padding: '3px 6px',
-                cursor: 'pointer',
-                borderRadius: '3px',
-                fontSize: '10px'
-              }}
-            >
-              Color
-            </button>
-            {selectedType === 'text' && (
-              <button
-                onClick={editText}
-                style={{
-                  backgroundColor: '#17a2b8',
-                  color: '#fff',
-                  border: 'none',
-                  padding: '3px 6px',
-                  cursor: 'pointer',
-                  borderRadius: '3px',
-                  fontSize: '10px'
-                }}
-              >
-                Edit
-              </button>
-            )}
-          </div>
-        )}
-        
-        <button
-          onClick={exportToPNG}
-          style={{
-            backgroundColor: '#28a745',
-            color: '#fff',
-            border: 'none',
-            padding: '3px 6px',
-            cursor: 'pointer',
-            marginLeft: 'auto',
-            borderRadius: '3px',
-            minWidth: '50px',
-            textAlign: 'center',
-            fontSize: '10px'
-          }}
-        >
-          Export
-        </button>
-        
-        <button
-          onClick={clearAll}
-          style={{
-            backgroundColor: '#dc3545',
-            color: '#fff',
-            border: 'none',
-            padding: '3px 6px',
-            cursor: annotationsEnabled ? 'pointer' : 'not-allowed',
-            opacity: annotationsEnabled ? 1 : 0.5,
-            borderRadius: '3px',
-            minWidth: '45px',
-            textAlign: 'center',
-            fontSize: '10px'
-          }}
-          disabled={!annotationsEnabled}
-        >
-          Clear
-        </button>
-        
-        <button
-          onClick={() => {
-            setScale(1);
-            setPosition({ x: 0, y: 0 });
-          }}
-          style={{
-            backgroundColor: '#6c757d',
-            color: '#fff',
-            border: 'none',
-            padding: '3px 6px',
-            cursor: 'pointer',
-            borderRadius: '3px',
-            minWidth: '50px',
-            textAlign: 'center',
-            fontSize: '10px'
-          }}
-        >
-          Reset
-        </button>
+        </div>
       </div>
 
       {/* Canvas Container */}
@@ -824,7 +873,15 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
                 <Line
                   key={line.id}
                   id={line.id}
-                  points={line.points}
+                  points={line.points.map((point, index) => {
+                    if (index % 2 === 0) {
+                      // X coordinate - transform from original image space to display space
+                      return imageX + (point * imageScale * scale);
+                    } else {
+                      // Y coordinate - transform from original image space to display space
+                      return imageY + (point * imageScale * scale);
+                    }
+                  })}
                   stroke={line.stroke}
                   strokeWidth={line.strokeWidth}
                   tension={0.5}
@@ -834,13 +891,22 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
                   onClick={handleShapeClick}
                   onTap={handleShapeClick}
                   onContextMenu={handleContextMenu}
+                  onDragEnd={(e) => handleShapeDragEnd(e, line.id, 'line')}
                 />
               ))}
               
               {/* Current Line (while drawing) */}
               {currentLine.length > 0 && (
                 <Line
-                  points={currentLine}
+                  points={currentLine.map((point, index) => {
+                    if (index % 2 === 0) {
+                      // X coordinate - transform from original image space to display space
+                      return imageX + (point * imageScale * scale);
+                    } else {
+                      // Y coordinate - transform from original image space to display space
+                      return imageY + (point * imageScale * scale);
+                    }
+                  })}
                   stroke={color}
                   strokeWidth={strokeWidth}
                   tension={0.5}
@@ -861,8 +927,8 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
                 <Text
                   key={text.id}
                   id={text.id}
-                  x={text.x}
-                  y={text.y}
+                  x={imageX + (text.x * imageScale * scale)}
+                  y={imageY + (text.y * imageScale * scale)}
                   text={text.text}
                   fontSize={text.fontSize}
                   fill={text.fill}
@@ -872,6 +938,7 @@ const AnnotatedImageWithZoom = ({ imageUrl }) => {
                   onDblClick={handleTextDblClick}
                   onDblTap={handleTextDblClick}
                   onContextMenu={handleContextMenu}
+                  onDragEnd={(e) => handleShapeDragEnd(e, text.id, 'text')}
                 />
               ))}
               

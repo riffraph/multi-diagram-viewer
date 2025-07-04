@@ -1,20 +1,23 @@
 # Multi-Diagram Viewer
 
-A modern web application for viewing and annotating multiple diagrams simultaneously. Built with React, Python FastAPI, and Docker.
+A modern web application for viewing and annotating multiple diagrams simultaneously. Built with React, Node.js Express (TypeScript), and Docker.
 
 ## Features
 
-- **Multi-Panel Viewing**: View up to 4 diagrams simultaneously in resizable panels
-- **Interactive Annotations**: Add drawings, shapes, and text annotations to diagrams
+- **Quadrant-Based Panel System**: View up to 4 diagrams simultaneously in a flexible 2x2 grid layout
+- **Interactive Annotations**: Add drawings, shapes, and text annotations to diagrams with precise coordinate tracking
+- **State Preservation**: Annotations, zoom, and pan state are preserved when adding/removing panels
+- **Cross-Resizable Dividers**: Drag the intersection point to resize both horizontal and vertical panels simultaneously
 - **Zoom and Pan**: Smooth zoom and pan controls with mouse wheel and right-click drag
 - **Real-time Collaboration**: WebSocket support for real-time updates
-- **Responsive Layout**: Dynamic panel resizing and responsive design
-- **Modern UI**: Clean, compact interface optimized for diagram viewing
+- **Responsive Layout**: Dynamic panel resizing with horizontal expansion priority
+- **Modern UI**: Clean, compact interface with static quadrant addition buttons
+- **Export Functionality**: Export annotated diagrams as high-quality PNG files
 
 ## Tech Stack
 
 - **Frontend**: React, react-konva (for canvas-based annotations)
-- **Backend**: Python FastAPI
+- **Backend**: Node.js Express with TypeScript
 - **Containerization**: Docker & Docker Compose
 - **Real-time**: WebSocket communication
 
@@ -44,10 +47,11 @@ docker-compose up --build
 
 ## Usage
 
-### Adding Diagrams
-- Use the dropdown menu to select diagrams from the available list
-- Click "Add" to add them to the viewing panels
-- You can add up to 4 diagrams simultaneously
+### Panel Management
+- **Quadrant Buttons**: Use the static buttons (top-left, top-right, bottom-left, bottom-right) to add diagrams to specific quadrants
+- **Cross-Resizable Dividers**: Drag the intersection point to resize both horizontal and vertical panels simultaneously
+- **Horizontal Expansion**: Single panels in a row automatically expand to fill available width
+- **Remove Panels**: Use the "Remove" button on each panel header
 
 ### Navigation Controls
 - **Mouse Wheel**: Zoom in/out on diagrams
@@ -55,27 +59,34 @@ docker-compose up --build
 - **Reset View**: Click the reset button to return to the original view
 
 ### Annotations
-- **Pen Tool**: Draw freehand lines
+- **Global Controls**: Use the global annotation controls to enable/disable annotations and select tools
+- **Pen Tool**: Draw freehand lines with precise coordinate tracking
 - **Rectangle Tool**: Draw rectangles
 - **Circle Tool**: Draw circles
 - **Text Tool**: Add text annotations (click to place, then enter text)
+- **Export**: Export annotated diagrams as high-quality PNG files
 
-### Panel Management
-- **Resize Panels**: Drag the dividers between panels to resize them
-- **Remove Panels**: Use the "Remove" button on each panel header
+### Layout Behavior
+- **1 Panel**: Expands to fill the entire viewport
+- **2 Panels**: Side-by-side layout with resizable divider
+- **3 Panels**: Two panels in one row, one panel in the other row (expands horizontally)
+- **4 Panels**: 2x2 grid with cross-resizable dividers
 
 ## Project Structure
 
 ```
 multi-diagram-viewer/
 ├── backend/
-│   ├── main.py              # FastAPI server
-│   └── requirements.txt     # Python dependencies
+│   ├── src/
+│   │   └── server.ts        # Express server (TypeScript)
+│   ├── package.json         # Node.js dependencies
+│   └── tsconfig.json        # TypeScript configuration
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx          # Main application component
+│   │   ├── App.jsx          # Main application component with quadrant logic
 │   │   ├── components/
-│   │   │   └── AnnotatedImageWithZoom.jsx  # Image viewer with annotations
+│   │   │   ├── AnnotatedImageWithZoom.jsx  # Image viewer with annotations
+│   │   │   └── CrossResizableDivider.jsx   # Cross-resizable divider component
 │   │   └── index.js         # React entry point
 │   ├── public/
 │   └── package.json         # Node.js dependencies
@@ -84,6 +95,22 @@ multi-diagram-viewer/
 ├── Dockerfile              # Multi-stage Docker build
 └── README.md               # This file
 ```
+
+## Key Improvements
+
+### Recent Updates
+- **Quadrant Model**: Implemented a clean quadrant-based panel system for predictable layout behavior
+- **State Preservation**: Annotations, zoom, and pan state are now preserved when adding/removing panels
+- **Coordinate System**: Fixed annotation coordinate tracking for precise drawing across all panels
+- **Resizing Logic**: Improved cross-resizable dividers that follow mouse cursor naturally
+- **Layout Priority**: Horizontal expansion takes priority over vertical expansion for better UX
+- **Export Quality**: High-quality PNG export with proper annotation scaling
+
+### Technical Architecture
+- **Lifted State Management**: Annotation and zoom state moved to App level for better persistence
+- **Coordinate Transformation**: Proper coordinate system handling for accurate annotations
+- **Layout Validation**: Ensures valid 2x2 grid layouts with proper constraints
+- **Performance Optimizations**: Efficient re-rendering and state updates
 
 ## Development
 
@@ -99,9 +126,11 @@ npm start
 2. **Backend Development**:
 ```bash
 cd backend
-pip install -r requirements.txt
-uvicorn main:app --reload
+npm install
+npm run dev
 ```
+
+**Note**: The backend uses TypeScript. For production builds, run `npm run build` to compile TypeScript to JavaScript.
 
 ### Building for Production
 
@@ -130,5 +159,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - Built with [React](https://reactjs.org/) and [react-konva](https://konvajs.org/docs/react/)
-- Backend powered by [FastAPI](https://fastapi.tiangolo.com/)
+- Backend powered by [Node.js Express](https://expressjs.com/) with TypeScript
 - Containerized with [Docker](https://www.docker.com/) 
