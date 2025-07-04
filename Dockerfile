@@ -1,7 +1,7 @@
 # Multi-stage build for the multi-diagram viewer
 
 # Stage 1: Build the frontend
-FROM node:18-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -18,7 +18,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Run the backend with the built frontend
-FROM node:18-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
