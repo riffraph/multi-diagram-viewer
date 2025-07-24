@@ -161,3 +161,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Built with [React](https://reactjs.org/) and [react-konva](https://konvajs.org/docs/react/)
 - Backend powered by [Node.js Express](https://expressjs.com/) with TypeScript
 - Containerized with [Docker](https://www.docker.com/) 
+
+## Real-Time Image Reload
+
+When a diagram file is modified on the server, any panel displaying that image in the frontend will automatically reload to show the latest version. This is achieved by:
+- The backend sending a WebSocket notification (`file_modified`) to the frontend when a file changes.
+- The frontend tracking which images are loaded in panels and incrementing a reload key for affected panels.
+- The panel fetches a fresh image from the server using a cache-busting query parameter, ensuring the latest version is displayed without browser caching issues. 

@@ -3,36 +3,44 @@ import AnnotatedImageWithZoom from './components/AnnotatedImageWithZoom';
 import AnnotationControls from './components/AnnotationControls';
 import CrossResizableDivider from './components/CrossResizableDivider';
 
-const DiagramPanel = ({ filename, onRemove, globalAnnotationSettings, preservedAnnotations, preservedZoomState, onAnnotationsUpdate, onZoomStateUpdate }) => {
+const DiagramPanel = ({ filename, onRemove, globalAnnotationSettings, preservedAnnotations, preservedZoomState, onAnnotationsUpdate, onZoomStateUpdate, reloadKey }) => {
   const [imageSrc, setImageSrc] = useState('');
   const [error, setError] = useState('');
 
   const loadImage = async () => {
     try {
       setError('');
-      const response = await fetch(`/api/diagrams/${filename}`);
+      // Add cache-busting query param only if reloadKey is not zero
+      const url = reloadKey
+        ? `/api/diagrams/${filename}?v=${reloadKey}`
+        : `/api/diagrams/${filename}`;
+      console.log(`[DiagramPanel] loadImage called for ${filename} with reloadKey=${reloadKey}, url=${url}`);
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error(`Failed to load image: ${response.statusText}`);
       }
       const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setImageSrc(url);
+      const objectUrl = URL.createObjectURL(blob);
+      setImageSrc(objectUrl);
+      console.log(`[DiagramPanel] setImageSrc for ${filename} (reloadKey=${reloadKey})`);
     } catch (err) {
       setError(err.message);
-      console.error('Error loading image:', err);
+      console.error('[DiagramPanel] Error loading image:', err);
     }
   };
 
   useEffect(() => {
+    console.log(`[DiagramPanel] useEffect triggered for ${filename} with reloadKey=${reloadKey}`);
     loadImage();
     
     // Cleanup function to revoke object URL
     return () => {
       if (imageSrc) {
         URL.revokeObjectURL(imageSrc);
+        console.log(`[DiagramPanel] Revoked object URL for ${filename}`);
       }
     };
-  }, [filename]);
+  }, [filename, reloadKey]); // Add reloadKey to dependency array
 
   const handleReload = () => {
     loadImage();
@@ -92,6 +100,7 @@ const DiagramPanel = ({ filename, onRemove, globalAnnotationSettings, preservedA
             preservedZoomState={preservedZoomState}
             onAnnotationsUpdate={onAnnotationsUpdate}
             onZoomStateUpdate={onZoomStateUpdate}
+            reloadKey={reloadKey}
           />
         ) : (
           <div style={{ padding: '20px', textAlign: 'center' }}>
@@ -643,6 +652,10 @@ function App() {
   const [diagrams, setDiagrams] = useState([]);
   const [selectedImage, setSelectedImage] = useState('');
   const [quadrantState, setQuadrantState] = useState({ 0: null, 1: null, 2: null, 3: null });
+  const quadrantStateRef = useRef(quadrantState);
+  useEffect(() => {
+    quadrantStateRef.current = quadrantState;
+  }, [quadrantState]);
   const [layout, setLayout] = useState({
     arrangement: 'cross',
     crossDivider: { x: 50, y: 50 }
@@ -659,6 +672,7 @@ function App() {
   // Store annotation state for each panel to preserve across re-renders
   const [panelAnnotations, setPanelAnnotations] = useState({});
   const [panelZoomStates, setPanelZoomStates] = useState({});
+  const [panelReloadKeys, setPanelReloadKeys] = useState({});
   
   // Functions to update annotation and zoom state for specific panels
   const updatePanelAnnotations = (filename, annotations) => {
@@ -683,6 +697,11 @@ function App() {
       return newState;
     });
     setPanelZoomStates(prev => {
+      const newState = { ...prev };
+      delete newState[filename];
+      return newState;
+    });
+    setPanelReloadKeys(prev => {
       const newState = { ...prev };
       delete newState[filename];
       return newState;
@@ -739,26 +758,43 @@ function App() {
     
     wsRef.current.onopen = () => {
       setWsStatus('connected');
+      console.log('[WebSocket] Connected');
     };
     
     wsRef.current.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log('WebSocket message:', data);
+      console.log('[WebSocket] Message received:', data);
       
       // Reload diagrams list when files change
       if (['file_created', 'file_modified', 'file_deleted'].includes(data.type)) {
         loadDiagrams();
       }
+      if (data.type === 'file_modified') {
+        // Find which quadrant(s) have this file loaded (use ref for latest state)
+        Object.entries(quadrantStateRef.current).forEach(([quadrant, filename]) => {
+          if (filename === data.filename) {
+            setPanelReloadKeys(prev => {
+              const newKey = (prev[filename] || 0) + 1;
+              console.log(`[WebSocket] file_modified for ${filename}, updating reloadKey to ${newKey}`);
+              return {
+                ...prev,
+                [filename]: newKey
+              };
+            });
+          }
+        });
+      }
     };
     
     wsRef.current.onclose = () => {
       setWsStatus('disconnected');
+      console.log('[WebSocket] Disconnected');
       // Reconnect after 5 seconds
       setTimeout(connectWebSocket, 5000);
     };
     
     wsRef.current.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error('[WebSocket] Error:', error);
       setWsStatus('error');
     };
   };
@@ -822,6 +858,7 @@ function App() {
           <DiagramPanel
             key={filename}
             filename={filename}
+            reloadKey={panelReloadKeys[filename] || 0}
             onRemove={handleRemoveDiagram}
             globalAnnotationSettings={{
               annotationsEnabled,

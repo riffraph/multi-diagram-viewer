@@ -1,13 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Stage, Layer, Image, Line, Rect, Circle, Text, Transformer } from 'react-konva';
 
+/**
+ * @param {Object} props
+ * @param {string} props.imageUrl
+ * @param {Object} props.globalAnnotationSettings
+ * @param {Object} props.preservedAnnotations
+ * @param {Object} props.preservedZoomState
+ * @param {Function} props.onAnnotationsUpdate
+ * @param {Function} props.onZoomStateUpdate
+ * @param {number} [props.reloadKey]
+ */
 const AnnotatedImageWithZoom = ({ 
   imageUrl, 
   globalAnnotationSettings, 
   preservedAnnotations, 
   preservedZoomState, 
   onAnnotationsUpdate, 
-  onZoomStateUpdate 
+  onZoomStateUpdate, 
+  reloadKey = 0 // Add reloadKey prop with default
 }) => {
   const [image, setImage] = useState(null);
   const [scale, setScale] = useState(preservedZoomState?.scale ?? 1);
@@ -75,7 +86,7 @@ const AnnotatedImageWithZoom = ({
       setIsInitialized(false); // Reset initialization flag for new image
     };
     img.src = imageUrl;
-  }, [imageUrl]);
+  }, [imageUrl, reloadKey]); // Add reloadKey to dependency array
 
   // Handle container sizing - measure the actual visible area
   useEffect(() => {
